@@ -13,7 +13,7 @@ class PhotoFilmGrain:
                     ["gaussian", "poisson", "perlin"], {"default": "gaussian"}
                 ),
                 "grain_intensity": (
-                    "FLOAT", {"default": 0.012, "min": 0.01, "max": 1.0, "step": 0.001}
+                    "FLOAT", {"default": 0.012, "min": 0.001, "max": 1.0, "step": 0.001}
                 ),
                 "saturation_mix": (
                     "FLOAT", {"default": 0.52, "min": 0.0, "max": 1.0, "step": 0.01}
