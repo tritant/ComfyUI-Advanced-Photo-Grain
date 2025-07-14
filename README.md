@@ -1,4 +1,4 @@
-# ComfyUI-Advanced-Photo-Grain
+# Advanced-Photo-Grain ComfyUI Node
 <img width="515" height="385" alt="Capture d'écran 2025-07-14 120943" src="https://github.com/user-attachments/assets/2e39857b-63da-4604-9a67-ee6d35ec3a54" />
 
 ---
