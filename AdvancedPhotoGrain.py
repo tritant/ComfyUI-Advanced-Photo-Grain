@@ -2,6 +2,8 @@ import torch
 import torch.nn.functional as F
 import comfy
 import numpy as np
+# Ajout nécessaire pour l'effet de flou
+import torchvision.transforms.functional as TF
 
 class PhotoFilmGrain:
     @classmethod
@@ -24,6 +26,10 @@ class PhotoFilmGrain:
                 "adaptive_grain": (
                     "FLOAT", {"default": 0.30, "min": 0.0, "max": 2.0, "step": 0.01}
                 ),
+                # NOUVEL EFFET "FILM LOOK"
+                "halation_strength": (
+                    "FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}
+                ),
                 "vignette_strength": (
                     "FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}
                 ),
@@ -40,7 +46,7 @@ class PhotoFilmGrain:
 
     def apply_grain(
         self, images, grain_type, grain_intensity, grain_size, saturation_mix,
-        adaptive_grain, vignette_strength, chromatic_aberration
+        adaptive_grain, halation_strength, vignette_strength, chromatic_aberration
     ):
         device = comfy.model_management.get_torch_device()
         images = images.to(device)
@@ -67,6 +73,9 @@ class PhotoFilmGrain:
             output = output.clamp(0.0, 1.0)
         else:
             output = images
+
+        if halation_strength > 0.0:
+            output = self._apply_halation(output, halation_strength)
 
         if vignette_strength > 0.0:
             output = self._apply_vignette(output, vignette_strength)
@@ -121,8 +130,6 @@ class PhotoFilmGrain:
         scale = max(4, 32 // size)
         
         perlin = self._make_fractal_noise(B, H, W, scale, images.device)
-        
-        # On recentre le bruit de [0, 1] à [-1, 1] pour une intensité comparable
         perlin = (perlin - 0.5) * 2.0
         
         perlin = perlin.unsqueeze(3).repeat(1, 1, 1, 3)
@@ -136,21 +143,49 @@ class PhotoFilmGrain:
 
         for _ in range(octaves):
             current_scale = max(2, int(scale * frequency))
-            
             coarse_noise = torch.rand(B, current_scale, current_scale, 1, device=device)
             upscaled_noise = F.interpolate(coarse_noise.permute(0, 3, 1, 2), size=(H, W), mode="bilinear", align_corners=False).squeeze(1)
-            
             total_noise += upscaled_noise * amplitude
-            
             max_amplitude += amplitude
             amplitude *= persistence
             frequency *= lacunarity
 
-        # Normalisation pour ramener le bruit dans une plage de [0, 1]
         if max_amplitude > 0:
             total_noise /= max_amplitude
             
         return total_noise
+
+    def _apply_halation(self, image, strength):
+        B, H, W, C = image.shape
+        if C != 3: return image
+
+        # 1. Isoler les hautes lumières
+        luma = image.mean(dim=3, keepdim=True)
+        highlights_mask = torch.clamp((luma - 0.75) * 4, 0, 1) # Seuil doux à 0.75
+        
+        # 2. Créer le halo rouge en floutant le canal rouge des hautes lumières
+        red_channel = image[:, :, :, 0:1]
+        red_glow = red_channel * highlights_mask
+        
+        # Le rayon du flou dépend de la force et de la taille de l'image
+        blur_radius = int(strength * (W / 25)) * 2 + 1
+        if blur_radius < 3: return image
+
+        # Permutation pour le flou : (B, H, W, C) -> (B, C, H, W)
+        red_glow_permuted = red_glow.permute(0, 3, 1, 2)
+        red_glow_blurred = TF.gaussian_blur(red_glow_permuted, kernel_size=blur_radius)
+        # Retour à (B, H, W, C)
+        red_glow_blurred = red_glow_blurred.permute(0, 2, 3, 1)
+
+        # 3. Créer la couche de halation (0 pour vert/bleu, le flou pour rouge)
+        halation_layer = torch.cat([
+            red_glow_blurred, 
+            torch.zeros_like(red_glow_blurred), 
+            torch.zeros_like(red_glow_blurred)
+        ], dim=3)
+
+        # 4. Ajouter la halation à l'image
+        return (image + halation_layer * strength).clamp(0.0, 1.0)
 
     def _apply_vignette(self, image, strength):
         B, H, W, C = image.shape
