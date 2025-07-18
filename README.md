@@ -4,8 +4,6 @@
 
 ---
 
-Voici le tableau des paramètres au format Markdown.
-
 ## 🎛️ Paramètres du Node
 
 | Paramètre | Type | Description |
@@ -16,6 +14,7 @@ Voici le tableau des paramètres au format Markdown.
 | **saturation\_mix** | `FLOAT` (0.0 – 1.0) | Mélange entre bruit coloré (1.0) et bruit monochrome (0.0). Valeur typique : `0.4` à `0.5` pour un rendu cinéma. |
 | **adaptive\_grain** | `FLOAT` (0.0 – 2.0) | Amplifie le grain selon la luminosité de l’image (plus de grain dans les ombres). `0.0` = désactivé. `0.8` à `1.5` donne de bons résultats en portrait. |
 | **halation\_strength**| `FLOAT` (0.0 – 1.0) | Simule l'effet de halo rouge autour des hautes lumières, typique des pellicules argentiques. Visible à partir de `0.2`. |
+| **lens\_distortion**| `FLOAT` (-0.5 – 0.5) | Simule la distorsion optique de l'objectif. Négatif = barillet (convexe), Positif = coussinet (concave). |
 | **vignette\_strength** | `FLOAT` (0.0 – 1.0) | Assombrit légèrement les bords pour simuler un vignettage optique. `0.15` recommandé. |
 | **chromatic\_aberration** | `FLOAT` (0.0 – 5.0) | Ajoute une frange RGB aux contours, en simulant l’aberration chromatique des objectifs photo. Effet visible à partir de `0.5`. Typiquement `0.3` à `0.8`. |
 
