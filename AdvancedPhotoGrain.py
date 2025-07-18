@@ -117,21 +117,40 @@ class PhotoFilmGrain:
 
     def _generate_perlin(self, images, size):
         B, H, W, C = images.shape
-        size = int(size) 
+        size = int(size)
         scale = max(4, 32 // size)
-        perlin = self._make_perlin_noise(B, H, W, scale, images.device)
+        
+        perlin = self._make_fractal_noise(B, H, W, scale, images.device)
+        
+        # On recentre le bruit de [0, 1] à [-1, 1] pour une intensité comparable
+        perlin = (perlin - 0.5) * 2.0
+        
         perlin = perlin.unsqueeze(3).repeat(1, 1, 1, 3)
         return perlin
 
-    def _make_perlin_noise(self, B, H, W, scale, device):
-        grid_y, grid_x = torch.meshgrid(
-            torch.linspace(0, 1, H, device=device),
-            torch.linspace(0, 1, W, device=device),
-            indexing="ij"
-        )
-        coarse = torch.rand(B, scale, scale, 1, device=device)
-        upscaled = F.interpolate(coarse.permute(0, 3, 1, 2), size=(H, W), mode="bilinear", align_corners=False)
-        return upscaled.squeeze(1)
+    def _make_fractal_noise(self, B, H, W, scale, device, octaves=4, persistence=0.5, lacunarity=2.0):
+        total_noise = torch.zeros(B, H, W, device=device)
+        frequency = 1.0
+        amplitude = 1.0
+        max_amplitude = 0.0
+
+        for _ in range(octaves):
+            current_scale = max(2, int(scale * frequency))
+            
+            coarse_noise = torch.rand(B, current_scale, current_scale, 1, device=device)
+            upscaled_noise = F.interpolate(coarse_noise.permute(0, 3, 1, 2), size=(H, W), mode="bilinear", align_corners=False).squeeze(1)
+            
+            total_noise += upscaled_noise * amplitude
+            
+            max_amplitude += amplitude
+            amplitude *= persistence
+            frequency *= lacunarity
+
+        # Normalisation pour ramener le bruit dans une plage de [0, 1]
+        if max_amplitude > 0:
+            total_noise /= max_amplitude
+            
+        return total_noise
 
     def _apply_vignette(self, image, strength):
         B, H, W, C = image.shape
