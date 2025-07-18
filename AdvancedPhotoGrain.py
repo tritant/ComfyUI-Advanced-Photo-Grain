@@ -26,7 +26,6 @@ class PhotoFilmGrain:
                 "adaptive_grain": (
                     "FLOAT", {"default": 0.30, "min": 0.0, "max": 2.0, "step": 0.01}
                 ),
-                # NOUVEL EFFET "FILM LOOK"
                 "halation_strength": (
                     "FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}
                 ),
@@ -35,6 +34,10 @@ class PhotoFilmGrain:
                 ),
                 "chromatic_aberration": (
                     "FLOAT", {"default": 0.0, "min": 0.0, "max": 5.0, "step": 0.1}
+                ),
+                # NOUVEL EFFET: LENS DISTORTION
+                "lens_distortion": (
+                    "FLOAT", {"default": 0.0, "min": -0.5, "max": 0.5, "step": 0.01}
                 ),
             }
         }
@@ -46,7 +49,8 @@ class PhotoFilmGrain:
 
     def apply_grain(
         self, images, grain_type, grain_intensity, grain_size, saturation_mix,
-        adaptive_grain, halation_strength, vignette_strength, chromatic_aberration
+        adaptive_grain, halation_strength, vignette_strength, chromatic_aberration,
+        lens_distortion
     ):
         device = comfy.model_management.get_torch_device()
         images = images.to(device)
@@ -76,6 +80,9 @@ class PhotoFilmGrain:
 
         if halation_strength > 0.0:
             output = self._apply_halation(output, halation_strength)
+        
+        if lens_distortion != 0.0:
+            output = self._apply_lens_distortion(output, lens_distortion)
 
         if vignette_strength > 0.0:
             output = self._apply_vignette(output, vignette_strength)
@@ -159,33 +166,60 @@ class PhotoFilmGrain:
         B, H, W, C = image.shape
         if C != 3: return image
 
-        # 1. Isoler les hautes lumières
         luma = image.mean(dim=3, keepdim=True)
-        highlights_mask = torch.clamp((luma - 0.75) * 4, 0, 1) # Seuil doux à 0.75
+        highlights_mask = torch.clamp((luma - 0.75) * 4, 0, 1)
         
-        # 2. Créer le halo rouge en floutant le canal rouge des hautes lumières
         red_channel = image[:, :, :, 0:1]
         red_glow = red_channel * highlights_mask
         
-        # Le rayon du flou dépend de la force et de la taille de l'image
         blur_radius = int(strength * (W / 25)) * 2 + 1
         if blur_radius < 3: return image
 
-        # Permutation pour le flou : (B, H, W, C) -> (B, C, H, W)
         red_glow_permuted = red_glow.permute(0, 3, 1, 2)
         red_glow_blurred = TF.gaussian_blur(red_glow_permuted, kernel_size=blur_radius)
-        # Retour à (B, H, W, C)
         red_glow_blurred = red_glow_blurred.permute(0, 2, 3, 1)
 
-        # 3. Créer la couche de halation (0 pour vert/bleu, le flou pour rouge)
         halation_layer = torch.cat([
             red_glow_blurred, 
             torch.zeros_like(red_glow_blurred), 
             torch.zeros_like(red_glow_blurred)
         ], dim=3)
 
-        # 4. Ajouter la halation à l'image
         return (image + halation_layer * strength).clamp(0.0, 1.0)
+
+    def _apply_lens_distortion(self, image, strength):
+        B, H, W, C = image.shape
+        
+        # Créer une grille de coordonnées normalisées de -1 à 1
+        y, x = torch.meshgrid(
+            torch.linspace(-1, 1, H, device=image.device),
+            torch.linspace(-1, 1, W, device=image.device),
+            indexing="ij"
+        )
+        grid = torch.stack((x, y), dim=-1).unsqueeze(0).repeat(B, 1, 1, 1)
+
+        # Calculer la distance de chaque pixel au centre
+        radius = torch.sqrt(grid[..., 0]**2 + grid[..., 1]**2)
+
+        # Appliquer la formule de distorsion radiale
+        # k est notre "strength". strength < 0 = barillet, strength > 0 = coussinet
+        k = strength * -1 # Inverser pour un contrôle plus intuitif
+        distortion_factor = 1.0 + k * radius.pow(2)
+
+        # Appliquer la distorsion à la grille de coordonnées
+        distorted_grid = grid * distortion_factor.unsqueeze(-1)
+
+        # Échantillonner l'image originale en utilisant la nouvelle grille
+        image_permuted = image.permute(0, 3, 1, 2) # B, C, H, W
+        distorted_image = F.grid_sample(
+            image_permuted,
+            distorted_grid,
+            mode='bilinear',
+            padding_mode='border',
+            align_corners=False
+        )
+        
+        return distorted_image.permute(0, 2, 3, 1)
 
     def _apply_vignette(self, image, strength):
         B, H, W, C = image.shape
