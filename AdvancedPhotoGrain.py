@@ -10,16 +10,19 @@ class PhotoFilmGrain:
             "required": {
                 "images": ("IMAGE",),
                 "grain_type": (
-                    ["gaussian", "poisson", "perlin"], {"default": "gaussian"}
+                    ["gaussian", "poisson", "perlin"], {"default": "poisson"}
                 ),
                 "grain_intensity": (
-                    "FLOAT", {"default": 0.012, "min": 0.001, "max": 1.0, "step": 0.001}
+                    "FLOAT", {"default": 0.022, "min": 0.001, "max": 1.0, "step": 0.001}
+                ),
+                "grain_size": (
+                    "FLOAT", {"default": 1.5, "min": 1.0, "max": 16.0, "step": 0.1}
                 ),
                 "saturation_mix": (
-                    "FLOAT", {"default": 0.52, "min": 0.0, "max": 1.0, "step": 0.01}
+                    "FLOAT", {"default": 0.22, "min": 0.0, "max": 1.0, "step": 0.01}
                 ),
                 "adaptive_grain": (
-                    "FLOAT", {"default": 0.50, "min": 0.0, "max": 2.0, "step": 0.01}
+                    "FLOAT", {"default": 0.30, "min": 0.0, "max": 2.0, "step": 0.01}
                 ),
                 "vignette_strength": (
                     "FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}
@@ -36,31 +39,34 @@ class PhotoFilmGrain:
     DESCRIPTION = "Adds realistic film grain, vignette and RGB aberration to photos"
 
     def apply_grain(
-        self, images, grain_type, grain_intensity, saturation_mix,
+        self, images, grain_type, grain_intensity, grain_size, saturation_mix,
         adaptive_grain, vignette_strength, chromatic_aberration
     ):
         device = comfy.model_management.get_torch_device()
         images = images.to(device)
 
-        if grain_type == "gaussian":
-            grain = self._generate_gaussian(images)
-        elif grain_type == "poisson":
-            grain = self._generate_poisson(images)
-        elif grain_type == "perlin":
-            grain = self._generate_perlin(images)
+        if grain_intensity > 0.0:
+            if grain_type == "gaussian":
+                grain = self._generate_gaussian(images, grain_size)
+            elif grain_type == "poisson":
+                grain = self._generate_poisson(images, grain_size)
+            elif grain_type == "perlin":
+                grain = self._generate_perlin(images, grain_size)
+            else:
+                raise ValueError(f"Unsupported grain type: {grain_type}")
+
+            gray = grain[:, :, :, 1].unsqueeze(3).repeat(1, 1, 1, 3)
+            grain = saturation_mix * grain + (1.0 - saturation_mix) * gray
+
+            if adaptive_grain > 0.0:
+                luma = images.mean(dim=3, keepdim=True)
+                gain = (1.0 - luma).pow(2.0) * 2.5
+                grain = grain * (1.0 + adaptive_grain * gain)
+            
+            output = images + grain * grain_intensity
+            output = output.clamp(0.0, 1.0)
         else:
-            raise ValueError(f"Unsupported grain type: {grain_type}")
-
-        gray = grain[:, :, :, 1].unsqueeze(3).repeat(1, 1, 1, 3)
-        grain = saturation_mix * grain + (1.0 - saturation_mix) * gray
-
-        if adaptive_grain > 0.0:
-            luma = images.mean(dim=3, keepdim=True)
-            gain = (1.0 - luma).pow(2.0) * 2.5
-            grain = grain * (1.0 + adaptive_grain * gain)
-
-        output = images + grain * grain_intensity
-        output = output.clamp(0.0, 1.0)
+            output = images
 
         if vignette_strength > 0.0:
             output = self._apply_vignette(output, vignette_strength)
@@ -70,23 +76,49 @@ class PhotoFilmGrain:
 
         return (output.to(comfy.model_management.intermediate_device()),)
 
-    def _generate_gaussian(self, images):
-        grain = torch.randn_like(images)
-        grain[:, :, :, 0] *= 2.0
-        grain[:, :, :, 2] *= 3.0
-        return grain
+    def _generate_gaussian(self, images, size):
+        B, H, W, C = images.shape
+        size = int(size) 
+        if size <= 1:
+            noise = torch.randn_like(images)
+        else:
+            small_H, small_W = H // size, W // size
+            noise = torch.randn(B, small_H, small_W, C, device=images.device)
+            noise = noise.permute(0, 3, 1, 2)
+            noise = F.interpolate(noise, size=(H, W), mode="nearest")
+            noise = noise.permute(0, 2, 3, 1)
+        
+        noise[:, :, :, 0] *= 2.0
+        noise[:, :, :, 2] *= 3.0
+        return noise
 
-    def _generate_poisson(self, images):
-        scaled = torch.clamp(images * 255.0, 0, 255).round()
+    def _generate_poisson(self, images, size):
+        B, H, W, C = images.shape
+        size = int(size) 
+        if size <= 1:
+            target_images = images
+        else:
+            small_H, small_W = H // size, W // size
+            target_images = F.interpolate(images.permute(0, 3, 1, 2), size=(small_H, small_W), mode="bilinear", align_corners=False)
+            target_images = target_images.permute(0, 2, 3, 1)
+
+        scaled = torch.clamp(target_images * 255.0, 0, 255).round()
         noise = torch.poisson(scaled) - scaled
         grain = (noise / 255.0) * 16.0
+
+        if size > 1:
+            grain = grain.permute(0, 3, 1, 2)
+            grain = F.interpolate(grain, size=(H, W), mode="nearest")
+            grain = grain.permute(0, 2, 3, 1)
+
         grain[:, :, :, 0] *= 2.0
         grain[:, :, :, 2] *= 3.0
         return grain
 
-    def _generate_perlin(self, images):
+    def _generate_perlin(self, images, size):
         B, H, W, C = images.shape
-        scale = 32
+        size = int(size) 
+        scale = max(4, 32 // size)
         perlin = self._make_perlin_noise(B, H, W, scale, images.device)
         perlin = perlin.unsqueeze(3).repeat(1, 1, 1, 3)
         return perlin
@@ -132,8 +164,6 @@ class PhotoFilmGrain:
 
         return torch.cat([r, g, b], dim=3)
 
-
-# ComfyUI Registration
 NODE_CLASS_MAPPINGS = {
     "PhotoFilmGrain": PhotoFilmGrain,
 }
