@@ -24,7 +24,7 @@ class PhotoFilmGrain:
                     "FLOAT", {"default": 0.22, "min": 0.0, "max": 1.0, "step": 0.01}
                 ),
                 "adaptive_grain": (
-                    "FLOAT", {"default": 0.30, "min": 0.0, "max": 2.0, "step": 0.01}
+                    "FLOAT", {"default": 0.10, "min": 0.0, "max": 2.0, "step": 0.01}
                 ),
                 "halation_strength": (
                     "FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}
