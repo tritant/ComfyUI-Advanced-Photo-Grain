@@ -1,6 +1,6 @@
 [project]
 name = "ComfyUI-Advanced-Photo-Grain"
-description = "Adds realistic film grain, vignette and RGB aberration to photos"
+description = "Adds realistic film grain, Sharpen, vignette and RGB aberration to photos"
 version = "1.4.0"
 license = { file = "LICENSE.txt" }
 
@@ -11,5 +11,6 @@ Repository = "https://github.com/tritant/ComfyUI-Advanced-Photo-Grain"
 PublisherId = "tritant"
 DisplayName = "Advanced Photo Grain"
 Icon = ""
+
 
 
