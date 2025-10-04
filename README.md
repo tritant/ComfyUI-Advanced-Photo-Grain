@@ -1,4 +1,4 @@
-# Advanced-Photo-Grain ComfyUI Node
+# Advanced-Photo-Grain-Sharpen ComfyUI Node
 <img width="2557" height="1233" alt="Capture d'écran 2025-10-04 161918" src="https://github.com/user-attachments/assets/677be801-3cb4-403e-8140-e123b61afb37" />
 
 <img width="855" height="556" alt="Capture d'écran 2025-07-19 011317" src="https://github.com/user-attachments/assets/9d091c57-96d5-4d4d-b921-b38e0e639a4f" />
