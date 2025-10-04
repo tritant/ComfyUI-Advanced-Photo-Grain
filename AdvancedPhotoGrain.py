@@ -2,8 +2,8 @@ import torch
 import torch.nn.functional as F
 import comfy
 import numpy as np
-# Ajout nécessaire pour l'effet de flou
 import torchvision.transforms.functional as TF
+from scipy.ndimage import gaussian_filter
 
 class PhotoFilmGrain:
     @classmethod
@@ -24,7 +24,7 @@ class PhotoFilmGrain:
                     "FLOAT", {"default": 0.22, "min": 0.0, "max": 1.0, "step": 0.01}
                 ),
                 "adaptive_grain": (
-                    "FLOAT", {"default": 0.10, "min": 0.0, "max": 2.0, "step": 0.01}
+                    "FLOAT", {"default": 0.30, "min": 0.0, "max": 2.0, "step": 0.01}
                 ),
                 "halation_strength": (
                     "FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}
@@ -252,9 +252,40 @@ class PhotoFilmGrain:
 
         return torch.cat([r, g, b], dim=3)
 
+class FreqSeparationSharpen:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "radius": ("FLOAT", {"default": 2.0, "min": 0.1, "max": 50.0, "step": 0.1}),
+                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.1}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "process"
+    CATEGORY = "image/enhancement"
+
+    def process(self, image, radius, strength):
+        if strength == 0:
+            return (image,)
+
+        image_np = image.clone().numpy()[0]
+        low_freq = gaussian_filter(image_np, sigma=(radius, radius, 0))
+        high_freq = image_np - low_freq
+        processed_high_freq = high_freq * strength
+        final_image_np = low_freq + processed_high_freq
+        final_image_np = np.clip(final_image_np, 0, 1)
+        final_image_tensor = torch.from_numpy(final_image_np).unsqueeze(0)
+
+        return (final_image_tensor,)
+
 NODE_CLASS_MAPPINGS = {
     "PhotoFilmGrain": PhotoFilmGrain,
+    "FreqSeparationSharpen": FreqSeparationSharpen,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "PhotoFilmGrain": "📸 Photo Film Grain",
+    "FreqSeparationSharpen": "Frequency Separation Sharpen",
 }
